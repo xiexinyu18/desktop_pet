@@ -1,0 +1,5 @@
+# 桌宠 1.0.0 - 运行依赖
+PyQt6>=6.4.0
+opencv-python>=4.8.0
+numpy>=1.21.0
+pydantic>=2.0.0
