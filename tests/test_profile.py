@@ -34,3 +34,22 @@ def test_profile_store_save_load() -> None:
         assert loaded is not None
         assert loaded.name == profile.name
         assert loaded.species == profile.species
+
+
+def test_profile_store_list_by_owner_and_public() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        store = ProfileStore(base_dir=base)
+        p1 = PetProfile(id="pet1", name="A", species="cat", owner_id="user1", is_public=True)
+        p2 = PetProfile(id="pet2", name="B", species="cat", owner_id="user1", is_public=False)
+        p3 = PetProfile(id="pet3", name="C", species="cat", owner_id="user2", is_public=True)
+        store.save(p1)
+        store.save(p2)
+        store.save(p3)
+        assert len(store.list_by_owner("user1")) == 2
+        assert len(store.list_by_owner("user2")) == 1
+        assert len(store.list_by_owner("user3")) == 0
+        public = store.list_public()
+        assert len(public) == 2  # p1, p3
+        names = {p.name for p in public}
+        assert "A" in names and "C" in names and "B" not in names

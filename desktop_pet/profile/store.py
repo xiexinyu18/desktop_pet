@@ -69,3 +69,21 @@ class ProfileStore:
             with open(self._index_path(), "w", encoding="utf-8") as f:
                 json.dump({"ids": ids}, f, indent=2, ensure_ascii=False)
         return True
+
+    def list_by_owner(self, owner_id: str) -> List[PetProfile]:
+        """列出某用户拥有的宠物（用于登录后加载「我的小猫」）。"""
+        out = []
+        for pet_id in self.list_ids():
+            p = self.load(pet_id)
+            if p and (p.owner_id or "") == owner_id:
+                out.append(p)
+        return out
+
+    def list_public(self) -> List[PetProfile]:
+        """列出广场可见的宠物（访客只能看别人的小猫）。"""
+        out = []
+        for pet_id in self.list_ids():
+            p = self.load(pet_id)
+            if p and p.is_public:
+                out.append(p)
+        return out

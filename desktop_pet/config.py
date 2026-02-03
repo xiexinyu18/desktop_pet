@@ -8,6 +8,8 @@ DATA_DIR = ROOT_DIR / "data"
 PROFILES_DIR = DATA_DIR / "profiles"
 ALBUMS_DIR = DATA_DIR / "albums"
 HEALTH_DATA_DIR = DATA_DIR / "health"
+AUTH_DATA_DIR = DATA_DIR / "auth"  # 用户与登录
+AVATARS_DIR = DATA_DIR / "avatars"  # 用户上传/生成的猫咪形象
 
 # 窗口默认
 WINDOW_WIDTH = 200
@@ -27,5 +29,5 @@ LITTER_REMIND_INTERVAL = 1440  # 1 天
 
 def ensure_dirs() -> None:
     """确保数据目录存在。"""
-    for d in (DATA_DIR, PROFILES_DIR, ALBUMS_DIR, HEALTH_DATA_DIR):
+    for d in (DATA_DIR, PROFILES_DIR, ALBUMS_DIR, HEALTH_DATA_DIR, AUTH_DATA_DIR, AVATARS_DIR):
         d.mkdir(parents=True, exist_ok=True)

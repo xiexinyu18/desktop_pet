@@ -10,9 +10,11 @@ env/
 dist/
 build/
 
-# 桌宠本地数据（可选：不提交用户数据）
-# data/profiles/
-# data/albums/
+# 桌宠本地数据（不提交用户数据）
+data/profiles/
+data/albums/
+data/auth/
+data/avatars/
 *.db
 *.sqlite3
 
