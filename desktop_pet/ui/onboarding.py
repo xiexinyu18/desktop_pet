@@ -60,6 +60,9 @@ class OnboardingDialog(QDialog):
         self._btn_create.setEnabled(False)
         self._btn_create.clicked.connect(self._create_pet)
         layout.addWidget(self._btn_create)
+        btn_back = QPushButton("返回")
+        btn_back.clicked.connect(self.reject)
+        layout.addWidget(btn_back)
 
     def _choose_photo(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

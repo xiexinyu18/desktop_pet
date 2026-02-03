@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QWidget,
@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QGridLayout,
     QFrame,
+    QPushButton,
 )
 
 from desktop_pet.profile.models import PetProfile
@@ -19,6 +20,8 @@ from desktop_pet.auth.store import AuthStore
 
 
 class PlazaWindow(QWidget):
+    """广场窗口：以网格展示所有公开的桌宠；可返回欢迎页切换模式。"""
+    returnToWelcomeRequested = pyqtSignal()
     """广场窗口：以网格展示所有公开的桌宠（别人的小猫）。"""
 
     def __init__(
@@ -46,6 +49,10 @@ class PlazaWindow(QWidget):
         hint.setStyleSheet("color: gray;")
         layout.addWidget(hint)
 
+        btn_back = QPushButton("返回欢迎页（切换模式）")
+        btn_back.clicked.connect(self._on_back)
+        layout.addWidget(btn_back)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -56,6 +63,13 @@ class PlazaWindow(QWidget):
         layout.addWidget(scroll)
 
         self._refresh()
+
+    def _on_back(self) -> None:
+        self.close()  # closeEvent 会发射 returnToWelcomeRequested
+
+    def closeEvent(self, event) -> None:
+        self.returnToWelcomeRequested.emit()
+        super().closeEvent(event)
 
     def _refresh(self) -> None:
         """清空网格并重新加载公开宠物列表。"""

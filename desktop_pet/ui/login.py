@@ -42,9 +42,12 @@ class LoginDialog(QDialog):
         form.addRow("密码:", self._password)
         layout.addLayout(form)
 
-        btn = QPushButton("登录")
-        btn.clicked.connect(self._do_login)
-        layout.addWidget(btn)
+        btn_login = QPushButton("登录")
+        btn_login.clicked.connect(self._do_login)
+        layout.addWidget(btn_login)
+        btn_back = QPushButton("返回")
+        btn_back.clicked.connect(self.reject)
+        layout.addWidget(btn_back)
 
     def _do_login(self) -> None:
         username = self._username.text().strip()

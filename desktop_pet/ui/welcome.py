@@ -58,6 +58,11 @@ class WelcomeDialog(QDialog):
         btn_guest.clicked.connect(self._on_guest)
         layout.addWidget(btn_guest)
 
+        btn_quit = QPushButton("退出")
+        btn_quit.setMinimumHeight(36)
+        btn_quit.clicked.connect(self.reject)
+        layout.addWidget(btn_quit)
+
     def _on_login(self) -> None:
         dlg = LoginDialog(self._auth_store, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:

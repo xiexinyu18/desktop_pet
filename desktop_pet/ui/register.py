@@ -44,9 +44,12 @@ class RegisterDialog(QDialog):
         form.addRow("确认密码:", self._password2)
         layout.addLayout(form)
 
-        btn = QPushButton("注册")
-        btn.clicked.connect(self._do_register)
-        layout.addWidget(btn)
+        btn_register = QPushButton("注册")
+        btn_register.clicked.connect(self._do_register)
+        layout.addWidget(btn_register)
+        btn_back = QPushButton("返回")
+        btn_back.clicked.connect(self.reject)
+        layout.addWidget(btn_back)
 
     def _do_register(self) -> None:
         username = self._username.text().strip()

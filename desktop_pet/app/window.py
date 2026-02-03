@@ -3,9 +3,9 @@ import math
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QPoint, Qt, QTimer
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPixmap
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QWidget, QPushButton
 
 from desktop_pet.config import (
     WINDOW_ALWAYS_ON_TOP,
@@ -18,6 +18,7 @@ from desktop_pet.app.pet_actor import PetState, next_state_on_detection
 
 class PetWindow(QWidget):
     """桌面宠物窗口：无边框、置顶、可拖拽；支持头像图；待机眨眼与轻微弹跳。"""
+    returnToWelcomeRequested = pyqtSignal()
 
     def __init__(
         self,
@@ -58,6 +59,19 @@ class PetWindow(QWidget):
                 self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+
+        # 返回欢迎页按钮（小按钮在右上角）
+        self._btn_back = QPushButton("≡", self)
+        self._btn_back.setFixedSize(28, 22)
+        self._btn_back.setStyleSheet("font-size: 14px; border: 1px solid #ccc; border-radius: 4px; background: rgba(255,255,255,0.9);")
+        self._btn_back.setToolTip("返回欢迎页（切换模式）")
+        self._btn_back.setGeometry(self._width - 34, 4, 28, 22)
+        self._btn_back.raise_()
+        self._btn_back.clicked.connect(self._on_back_to_welcome)
+
+    def _on_back_to_welcome(self) -> None:
+        self.returnToWelcomeRequested.emit()
+        self.close()
 
     def _start_idle_animations(self) -> None:
         """待机：每隔几秒眨眼；持续轻微弹跳。"""

@@ -1,7 +1,7 @@
-"""桌宠入口：欢迎（登录/注册/访客）→ 桌宠或广场。"""
+"""桌宠入口：欢迎（登录/注册/访客）→ 桌宠或广场；各界面可返回欢迎页切换模式。"""
 import sys
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QEventLoop
 from PyQt6.QtWidgets import QApplication
 
 from desktop_pet import __version__
@@ -25,63 +25,68 @@ def main() -> None:
     auth_store = AuthStore()
     profile_store = ProfileStore()
 
-    # 1. 欢迎：登录 / 注册 / 访客
-    welcome = WelcomeDialog(auth_store)
-    if welcome.exec() != welcome.DialogCode.Accepted:
-        sys.exit(0)
+    while True:
+        # 1. 欢迎：登录 / 注册 / 访客 / 退出
+        welcome = WelcomeDialog(auth_store)
+        if welcome.exec() != welcome.DialogCode.Accepted:
+            break
 
-    choice = welcome.choice()
-    user = welcome.logged_user()
+        choice = welcome.choice()
+        user = welcome.logged_user()
 
-    if choice == "guest":
-        # 访客：只打开广场，不能创建小猫
-        plaza = PlazaWindow(profile_store, auth_store)
-        plaza.show()
-        sys.exit(app.exec())
-        return
+        if choice == "guest":
+            # 访客：只打开广场；可点「返回欢迎页」回到这里
+            plaza = PlazaWindow(profile_store, auth_store)
+            loop = QEventLoop()
+            plaza.returnToWelcomeRequested.connect(loop.quit)
+            plaza.show()
+            loop.exec()
+            continue
 
-    # 登录或注册成功
-    Session.set_current(user)
-    if not user:
-        sys.exit(0)
+        # 登录或注册成功
+        Session.set_current(user)
+        if not user:
+            continue
 
-    # 2. 检查是否已有桌宠
-    my_pets = profile_store.list_by_owner(user.id)
-    pet = my_pets[0] if my_pets else None
+        # 2. 检查是否已有桌宠
+        my_pets = profile_store.list_by_owner(user.id)
+        pet = my_pets[0] if my_pets else None
 
-    if not pet:
-        # 首次：引导上传猫咪照片并创建桌宠
-        onboarding = OnboardingDialog(user)
-        if onboarding.exec() != onboarding.DialogCode.Accepted:
-            sys.exit(0)
-        pet = onboarding.pet()
-    if not pet:
-        sys.exit(0)
+        if not pet:
+            # 首次：引导上传猫咪照片并创建桌宠；可点「返回」回到欢迎页
+            onboarding = OnboardingDialog(user)
+            if onboarding.exec() != onboarding.DialogCode.Accepted:
+                continue
+            pet = onboarding.pet()
+        if not pet:
+            continue
 
-    # 3. 打开桌宠窗口（使用该宠物的形象）
-    def on_detection(detected: bool) -> None:
-        if detected:
-            pass  # 可在此播放「宠物出现」音效等
+        # 3. 打开桌宠窗口（右上角「≡」可返回欢迎页）
+        def on_detection(detected: bool) -> None:
+            if detected:
+                pass  # 可在此播放「宠物出现」音效等
 
-    window = PetWindow(avatar_path=pet.avatar_path, on_detection=on_detection)
-    window.setWindowTitle(f"桌宠 - {pet.name}")
-    window.show()
+        window = PetWindow(avatar_path=pet.avatar_path, on_detection=on_detection)
+        window.setWindowTitle(f"桌宠 - {pet.name}")
 
-    detector = CameraDetector(interval_ms=CAMERA_DETECT_INTERVAL_MS)
+        detector = CameraDetector(interval_ms=CAMERA_DETECT_INTERVAL_MS)
+        timer = QTimer(window)
+        timer.timeout.connect(lambda: window.update_detection(detector.detect().pet_detected))
+        timer.start(CAMERA_DETECT_INTERVAL_MS)
 
-    def poll_camera() -> None:
-        result = detector.detect()
-        window.update_detection(result.pet_detected)
+        loop = QEventLoop()
+        def on_return() -> None:
+            timer.stop()
+            detector.release()
+            window.close()
+            loop.quit()
+        window.returnToWelcomeRequested.connect(on_return)
 
-    timer = QTimer(window)
-    timer.timeout.connect(poll_camera)
-    timer.start(CAMERA_DETECT_INTERVAL_MS)
+        window.show()
+        loop.exec()
+        # 用户点了返回欢迎页，继续下一轮循环
 
-    def on_quit() -> None:
-        detector.release()
-
-    app.aboutToQuit.connect(on_quit)
-    sys.exit(app.exec())
+    sys.exit(0)
 
 
 if __name__ == "__main__":
