@@ -15,6 +15,14 @@ from desktop_pet.config import (
 )
 from desktop_pet.app.pet_actor import PetState, next_state_on_detection
 
+# 可选：与宠物说话（TTS）弹窗
+try:
+    from desktop_pet.voice.tts import TTSEngine
+    from desktop_pet.ui.speak_dialog import SpeakDialog
+    _HAS_VOICE = True
+except Exception:
+    _HAS_VOICE = False
+
 
 class PetWindow(QWidget):
     """桌面宠物窗口：无边框、置顶、可拖拽；支持头像图；待机眨眼与轻微弹跳。"""
@@ -26,6 +34,8 @@ class PetWindow(QWidget):
         height: int = WINDOW_HEIGHT,
         avatar_path: Optional[str] = None,
         on_detection: Optional[Callable[[bool], None]] = None,
+        tts_engine: Optional["TTSEngine"] = None,
+        user_id: Optional[str] = None,
     ):
         super().__init__()
         self._width = width
@@ -33,6 +43,8 @@ class PetWindow(QWidget):
         self._state = PetState.IDLE
         self._drag_pos: Optional[QPoint] = None
         self._on_detection = on_detection
+        self._tts_engine = tts_engine
+        self._user_id = user_id
         self._avatar: Optional[QPixmap] = None
         if avatar_path and Path(avatar_path).exists():
             self._avatar = QPixmap(avatar_path)
@@ -68,6 +80,21 @@ class PetWindow(QWidget):
         self._btn_back.setGeometry(self._width - 34, 4, 28, 22)
         self._btn_back.raise_()
         self._btn_back.clicked.connect(self._on_back_to_welcome)
+
+        # 与宠物说话（TTS）
+        if _HAS_VOICE and self._tts_engine is not None:
+            self._btn_speak = QPushButton("说", self)
+            self._btn_speak.setFixedSize(26, 22)
+            self._btn_speak.setStyleSheet("font-size: 12px; border: 1px solid #ccc; border-radius: 4px; background: rgba(255,255,255,0.9);")
+            self._btn_speak.setToolTip("与宠物说话（输入文字转语音）")
+            self._btn_speak.setGeometry(self._width - 34, 28, 26, 22)
+            self._btn_speak.raise_()
+            self._btn_speak.clicked.connect(self._on_speak)
+
+    def _on_speak(self) -> None:
+        if _HAS_VOICE and self._tts_engine is not None:
+            dlg = SpeakDialog(self._tts_engine, self._user_id, self)
+            dlg.exec()
 
     def _on_back_to_welcome(self) -> None:
         self.returnToWelcomeRequested.emit()

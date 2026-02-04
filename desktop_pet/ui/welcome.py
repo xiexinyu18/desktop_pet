@@ -2,20 +2,24 @@
 from typing import Optional
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap, QPainter
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QLabel,
     QPushButton,
     QWidget,
-    QMessageBox,
 )
 
+from desktop_pet.config import ROOT_DIR
 from desktop_pet.ui.login import LoginDialog
 from desktop_pet.ui.register import RegisterDialog
 from desktop_pet.auth.session import Session
 from desktop_pet.auth.store import AuthStore
 from desktop_pet.auth.models import User
+
+# 欢迎页背景图路径
+WELCOME_BG_PATH = ROOT_DIR / "assets" / "welcome_bg.png"
 
 
 class WelcomeDialog(QDialog):
@@ -26,21 +30,43 @@ class WelcomeDialog(QDialog):
         self._auth_store = auth_store or AuthStore()
         self._logged_user: Optional[User] = None
         self._choice: str = ""  # "login" | "register" | "guest"
+        self._bg_pixmap: Optional[QPixmap] = None
+        if WELCOME_BG_PATH.exists():
+            self._bg_pixmap = QPixmap(str(WELCOME_BG_PATH))
         self.setup_ui()
 
     def setup_ui(self) -> None:
         self.setWindowTitle("桌宠 - 欢迎")
-        self.setFixedSize(360, 280)
+        self.setFixedSize(420, 380)
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
+
+        # 按钮与文字样式（背景图在 paintEvent 中绘制，避免 Qt 样式表 url 路径问题）
+        self.setStyleSheet("""
+            QLabel {
+                color: #2c1810;
+                background: transparent;
+            }
+            QPushButton {
+                background: rgba(255, 255, 255, 0.92);
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                padding: 6px;
+                color: #333;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.98);
+            }
+        """)
 
         title = QLabel("🐱 桌宠")
-        title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; background: transparent; color: #2c1810;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
         subtitle = QLabel("选择方式进入")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("background: transparent; color: #3d2817;")
         layout.addWidget(subtitle)
 
         btn_login = QPushButton("登录")
@@ -82,6 +108,22 @@ class WelcomeDialog(QDialog):
         self._logged_user = None
         self._choice = "guest"
         self.accept()
+
+    def paintEvent(self, event) -> None:
+        """先绘制背景图（小王子星空，按比例铺满并居中），再绘制控件。"""
+        if self._bg_pixmap and not self._bg_pixmap.isNull():
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            scaled = self._bg_pixmap.scaled(
+                self.width(), self.height(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            sx = (scaled.width() - self.width()) // 2
+            sy = (scaled.height() - self.height()) // 2
+            painter.drawPixmap(0, 0, scaled, sx, sy, self.width(), self.height())
+            painter.end()
+        super().paintEvent(event)
 
     def choice(self) -> str:
         return self._choice

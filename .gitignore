@@ -15,6 +15,7 @@ data/profiles/
 data/albums/
 data/auth/
 data/avatars/
+data/voice/
 *.db
 *.sqlite3
 

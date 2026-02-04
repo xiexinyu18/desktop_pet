@@ -3,3 +3,7 @@ PyQt6>=6.4.0
 opencv-python>=4.8.0
 numpy>=1.21.0
 pydantic>=2.0.0
+
+# 主人声音录入与 TTS（与宠物对话）
+pyttsx3>=2.90
+sounddevice>=0.4.6

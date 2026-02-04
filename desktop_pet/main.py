@@ -14,6 +14,9 @@ from desktop_pet.profile.store import ProfileStore
 from desktop_pet.ui.welcome import WelcomeDialog
 from desktop_pet.ui.onboarding import OnboardingDialog
 from desktop_pet.ui.plaza import PlazaWindow
+from desktop_pet.ui.voice_record import VoiceRecordDialog
+from desktop_pet.voice.store import VoiceProfileStore
+from desktop_pet.voice.tts import TTSEngine
 
 
 def main() -> None:
@@ -61,12 +64,24 @@ def main() -> None:
         if not pet:
             continue
 
-        # 3. 打开桌宠窗口（右上角「≡」可返回欢迎页）
+        # 2.5 可选：录入主人声音（用于后续模拟主人声线、TTS 与宠物对话）
+        voice_store = VoiceProfileStore()
+        if not voice_store.has_voice(user.id):
+            voice_dlg = VoiceRecordDialog(user, voice_store)
+            voice_dlg.exec()  # 可点「暂不录入」跳过
+
+        # 3. 打开桌宠窗口（右上角「≡」返回欢迎页，「说」打开与宠物说话）
         def on_detection(detected: bool) -> None:
             if detected:
                 pass  # 可在此播放「宠物出现」音效等
 
-        window = PetWindow(avatar_path=pet.avatar_path, on_detection=on_detection)
+        tts_engine = TTSEngine(voice_store)
+        window = PetWindow(
+            avatar_path=pet.avatar_path,
+            on_detection=on_detection,
+            tts_engine=tts_engine,
+            user_id=user.id,
+        )
         window.setWindowTitle(f"桌宠 - {pet.name}")
 
         detector = CameraDetector(interval_ms=CAMERA_DETECT_INTERVAL_MS)
