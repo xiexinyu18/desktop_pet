@@ -139,7 +139,13 @@ class AvatarGenDialog(QDialog):
             self._i2v_worker.start()
 
     def _on_i2v_success(self, video_path: str) -> None:
-        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}")
+        if self._pet:
+            self._pet.video_path = video_path
+            self._store.save(self._pet)
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "set_video_path"):
+            parent.set_video_path(video_path)
+        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
 
     def _on_i2v_fail(self, err: str) -> None:
         QMessageBox.warning(None, "短视频生成未完成", err)

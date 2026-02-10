@@ -21,6 +21,7 @@ class PetProfile(BaseModel):
     virtual_birthday: Optional[date] = Field(None, description="虚拟生日")
     weight_kg: Optional[float] = Field(None, description="体重 kg")
     avatar_path: Optional[str] = Field(None, description="头像/形象路径（上传照片或 AI 生成）")
+    video_path: Optional[str] = Field(None, description="即梦图生视频路径（首尾帧一致短视频，用于桌宠窗口内嵌播放）")
     owner_id: Optional[str] = Field(None, description="主人用户 ID；无则视为本地旧数据")
     is_public: bool = Field(True, description="是否在广场展示")
     created_at: Optional[str] = Field(None, description="创建时间 ISO")

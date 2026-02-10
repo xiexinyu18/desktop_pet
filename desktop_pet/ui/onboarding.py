@@ -181,7 +181,10 @@ class OnboardingDialog(QDialog):
             self._btn_create.setEnabled(True)
 
     def _on_i2v_success(self, video_path: str) -> None:
-        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}")
+        if self._pet:
+            self._pet.video_path = video_path
+            self._store.save(self._pet)
+        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
 
     def _on_i2v_fail(self, err: str) -> None:
         QMessageBox.warning(None, "短视频生成未完成", err)

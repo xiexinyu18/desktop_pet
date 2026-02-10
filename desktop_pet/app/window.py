@@ -1,9 +1,8 @@
-"""桌宠常驻窗口：置顶、可拖拽、可爱动效（头像/眨眼/弹跳）。"""
-import math
+"""桌宠常驻窗口：置顶、可拖拽、可爱动效（头像/眨眼）；支持内嵌即梦短视频。"""
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, QUrl
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPixmap
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton
 
@@ -14,6 +13,20 @@ from desktop_pet.config import (
     WINDOW_WIDTH,
 )
 from desktop_pet.app.pet_actor import PetState, next_state_on_detection
+
+# 头像/视频共用：内容区边距，保证图片与视频同一区域、同一比例
+CONTENT_MARGIN = 10
+
+# 可选：视频内嵌播放（即梦图生视频）
+try:
+    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+    from PyQt6.QtMultimediaWidgets import QVideoWidget
+    _HAS_VIDEO = True
+except Exception:
+    _HAS_VIDEO = False
+    QMediaPlayer = None
+    QAudioOutput = None
+    QVideoWidget = None
 
 # 可选：与宠物说话（TTS）弹窗
 try:
@@ -62,9 +75,17 @@ class PetWindow(QWidget):
             if self._avatar.isNull():
                 self._avatar = None
         self._eyes_closed = False
-        self._bounce_offset = 0.0
-        self._bounce_phase = 0.0
+        self._video_widget: Optional[QWidget] = None
+        self._media_player = None
         self.setup_ui()
+        # 若有宠物且已有视频路径，直接内嵌播放；否则启动轮询（i2v 完成后会写入 pet.video_path）
+        video_path = getattr(pet, "video_path", None) if pet else None
+        if video_path and Path(str(video_path)).exists():
+            self._setup_video(str(video_path))
+        elif _HAS_VIDEO and pet:
+            self._video_poll_timer = QTimer(self)
+            self._video_poll_timer.timeout.connect(self._check_pet_video_path)
+            self._video_poll_timer.start(2000)
         self._start_idle_animations()
 
     def setup_ui(self) -> None:
@@ -120,8 +141,99 @@ class PetWindow(QWidget):
         self._avatar = QPixmap(path)
         if self._avatar.isNull():
             self._avatar = None
+        self._update_video_widget_geometry()
         self.update()
         self.repaint()
+
+    def set_video_path(self, path: str) -> None:
+        """设置并播放即梦短视频（图生视频完成后由弹窗或轮询调用）。"""
+        path = str(path).strip()
+        if not path or not Path(path).exists():
+            return
+        if getattr(self, "_pet", None):
+            self._pet.video_path = path
+            if self._profile_store:
+                self._profile_store.save(self._pet)
+        self._setup_video(path)
+
+    def _update_video_widget_geometry(self) -> None:
+        """按头像图片实际显示尺寸与位置设置视频区域（与 paintEvent 中 scaled 一致）。"""
+        if self._video_widget is None:
+            return
+        content_w = self._width - 2 * CONTENT_MARGIN
+        content_h = self._height - 2 * CONTENT_MARGIN
+        if self._avatar and not self._avatar.isNull():
+            scaled = self._avatar.scaled(
+                content_w, content_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            vw, vh = scaled.width(), scaled.height()
+            vx = (self._width - vw) // 2
+            vy = (self._height - vh) // 2
+        else:
+            vx, vy = CONTENT_MARGIN, CONTENT_MARGIN
+            vw, vh = content_w, content_h
+        self._video_widget.setGeometry(vx, vy, vw, vh)
+
+    def _check_pet_video_path(self) -> None:
+        """轮询宠物档案中的 video_path，若新写入则内嵌播放并停止轮询。"""
+        if not self._pet or not _HAS_VIDEO or self._video_widget is not None:
+            return
+        path = getattr(self._pet, "video_path", None)
+        if path and Path(str(path)).exists():
+            if getattr(self, "_video_poll_timer", None):
+                self._video_poll_timer.stop()
+            self._setup_video(str(path))
+
+    def _setup_video(self, path: str) -> None:
+        """内嵌即梦短视频：QVideoWidget + QMediaPlayer，循环、静音，置于按钮下层。"""
+        if not _HAS_VIDEO or QVideoWidget is None or QMediaPlayer is None:
+            return
+        path = str(path)
+        if not Path(path).exists():
+            return
+        if self._video_widget is not None:
+            return
+        self._video_widget = QVideoWidget(self)
+        self._update_video_widget_geometry()
+        self._video_widget.setStyleSheet("background: transparent;")
+        self._media_player = QMediaPlayer()
+        self._media_player.setVideoOutput(self._video_widget)
+        # Qt6：音量由 QAudioOutput 控制，静音则设 volume 为 0
+        if QAudioOutput is not None:
+            self._audio_output = QAudioOutput(self)
+            self._audio_output.setVolume(0.0)
+            self._media_player.setAudioOutput(self._audio_output)
+        self._media_player.setSource(QUrl.fromLocalFile(path))
+        # 填满内容区，去除上下黑边（等比放大裁剪，与头像同区域）
+        try:
+            self._video_widget.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+        except Exception:
+            pass
+        # 播完后切回静态图，不循环（检测到人时只播完一遍）
+        try:
+            from PyQt6.QtMultimedia import QMediaPlayer as QMP
+            if hasattr(QMP, "mediaStatusChanged"):
+                self._media_player.mediaStatusChanged.connect(self._on_video_media_status)
+        except Exception:
+            pass
+        self._video_widget.lower()
+        # 默认不显示视频：等检测到人时再显示并播放（见 update_detection）
+        self._video_widget.hide()
+        self._media_player.pause()
+        self.update()
+
+    def _on_video_media_status(self, status) -> None:
+        """视频播完后切回静态图，不中断播放。"""
+        try:
+            from PyQt6.QtMultimedia import QMediaPlayer as QMP
+            if status == QMP.MediaStatus.EndOfMedia and self._media_player and self._video_widget:
+                self._media_player.pause()
+                self._video_widget.hide()
+                self.update()
+        except Exception:
+            pass
 
     def _on_avatar_gen(self) -> None:
         if _HAS_AVATAR_GEN and self._pet is not None and self._profile_store is not None:
@@ -143,14 +255,10 @@ class PetWindow(QWidget):
         self.close()
 
     def _start_idle_animations(self) -> None:
-        """待机：每隔几秒眨眼；持续轻微弹跳。"""
+        """待机：每隔几秒眨眼（已移除上下弹跳动效）。"""
         self._blink_timer = QTimer(self)
         self._blink_timer.timeout.connect(self._do_blink)
         self._blink_timer.start(3000)
-
-        self._bounce_timer = QTimer(self)
-        self._bounce_timer.timeout.connect(self._do_bounce)
-        self._bounce_timer.start(80)
 
     def _do_blink(self) -> None:
         if self._state != PetState.IDLE and self._state != PetState.EYES_LIT:
@@ -163,19 +271,17 @@ class PetWindow(QWidget):
         self._eyes_closed = False
         self.update()
 
-    def _do_bounce(self) -> None:
-        if self._state == PetState.DRAGGED:
-            return
-        self._bounce_phase += 0.25
-        self._bounce_offset = 2.0 * math.sin(self._bounce_phase)
-        self.update()
-
     def set_state(self, state: PetState) -> None:
         self._state = state
         self.update()
 
     def update_detection(self, pet_detected: bool) -> None:
         self._state = next_state_on_detection(self._state, pet_detected)
+        # 仅检测到人时触发播放；一旦开始播放不因检测丢失而中断，播完再切回静态图
+        if self._video_widget is not None and self._media_player is not None:
+            if pet_detected and not self._video_widget.isVisible():
+                self._video_widget.show()
+                self._media_player.play()
         self.update()
         if self._on_detection:
             self._on_detection(pet_detected)
@@ -198,37 +304,41 @@ class PetWindow(QWidget):
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:
+        # 若正在播放内嵌短视频，不绘制头像，由 QVideoWidget 展示
+        if self._video_widget is not None and self._video_widget.isVisible():
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        dy = int(self._bounce_offset)
         w, h = self._width, self._height
+        content_w = w - 2 * CONTENT_MARGIN
+        content_h = h - 2 * CONTENT_MARGIN
 
         if self._avatar and not self._avatar.isNull():
-            # 使用用户上传的猫咪形象：缩放绘制，并加「眼睛一亮」高光
+            # 使用用户上传的猫咪形象：与视频同一内容区与比例（KeepAspectRatio）
             scaled = self._avatar.scaled(
-                w - 20, h - 20,
+                content_w, content_h,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             x = (w - scaled.width()) // 2
-            y = (h - scaled.height()) // 2 + dy
+            y = (h - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
             if self._state == PetState.EYES_LIT:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(QColor(255, 255, 200, 120)))
-                painter.drawEllipse(w // 2 - 25, 30 + dy, 50, 30)
+                painter.drawEllipse(w // 2 - 25, 30, 50, 30)
         else:
             # 默认可爱几何形象：圆身体 + 眼睛（含眨眼与眼睛一亮）
             body_color = QColor(255, 200, 160, 220)
             painter.setBrush(QBrush(body_color))
             painter.setPen(QPen(QColor(255, 180, 140), 1))
-            painter.drawEllipse(15, 35 + dy, 170, 115)
+            painter.drawEllipse(15, 35, 170, 115)
 
             eye_radius = 11
             lx, rx = 72, 122
-            ey = 72 + dy
+            ey = 72
             if self._eyes_closed:
                 painter.setPen(QPen(QColor(80, 60, 40), 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
