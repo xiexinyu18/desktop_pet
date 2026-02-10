@@ -14,10 +14,17 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, ensure_dirs
+from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR, ensure_dirs
 from desktop_pet.jimeng.client import JimengClient
 from desktop_pet.profile.models import PetProfile
 from desktop_pet.profile.store import ProfileStore
+
+try:
+    from desktop_pet.jimeng.i2v_worker import I2VWorker
+    _HAS_I2V = True
+except Exception:
+    _HAS_I2V = False
+    I2VWorker = None
 
 
 class JimengWorker(QThread):
@@ -110,13 +117,32 @@ class AvatarGenDialog(QDialog):
         # 先发信号让桌宠窗口立即换上新头像并重绘，再弹框、关闭
         new_path_abs = str(Path(new_path).resolve())
         self.avatarUpdated.emit(new_path_abs)
-        QMessageBox.information(self, "完成", "AI 分身形象已生成并设为桌宠头像。")
+        QMessageBox.information(
+            self,
+            "完成",
+            "AI 分身形象已生成并设为桌宠头像。\n正在后台生成短视频，完成后会提示。",
+        )
         self.accept()
         # 关闭后把父窗口（桌宠）带到前台，方便用户看到新形象
         parent = self.parent()
         if parent is not None:
             parent.raise_()
             parent.activateWindow()
+        # 图生图完成后用生成的 AI 图调用图生视频，保存到专用目录
+        if _HAS_I2V and I2VWorker and JIMENG_ACCESS_KEY and JIMENG_SECRET_KEY:
+            ensure_dirs()
+            self._i2v_worker = I2VWorker(
+                new_path_abs, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR
+            )
+            self._i2v_worker.finished_success.connect(self._on_i2v_success)
+            self._i2v_worker.finished_fail.connect(self._on_i2v_fail)
+            self._i2v_worker.start()
+
+    def _on_i2v_success(self, video_path: str) -> None:
+        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}")
+
+    def _on_i2v_fail(self, err: str) -> None:
+        QMessageBox.warning(None, "短视频生成未完成", err)
 
     def _on_fail(self, err: str) -> None:
         self._progress.setVisible(False)

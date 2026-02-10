@@ -15,6 +15,7 @@ data/profiles/
 data/albums/
 data/auth/
 data/avatars/
+data/videos/
 data/voice/
 data/jimeng_last_response.json
 *.db

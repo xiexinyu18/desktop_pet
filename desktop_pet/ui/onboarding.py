@@ -17,18 +17,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from desktop_pet.auth.models import User
-from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, ensure_dirs
+from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR, ensure_dirs
 from desktop_pet.profile.models import PetProfile
 from desktop_pet.profile.onboarding import create_pet_from_photo, create_pet_with_avatar
 from desktop_pet.profile.store import ProfileStore
 
 try:
     from desktop_pet.jimeng.client import JimengClient
+    from desktop_pet.jimeng.i2v_worker import I2VWorker
     _HAS_JIMENG = True
 except Exception as e:
     import sys
     print(f"[桌宠-引导] 即梦模块导入失败: {e}", file=sys.stderr, flush=True)
     _HAS_JIMENG = False
+    I2VWorker = None
 
 
 class JimengOnboardingWorker(QThread):
@@ -159,11 +161,30 @@ class OnboardingDialog(QDialog):
         )
         if pet:
             self._pet = pet
-            QMessageBox.information(self, "完成", f"桌宠「{pet.name}」已创建！（已使用即梦 AI 形象）")
+            QMessageBox.information(
+                self,
+                "完成",
+                "桌宠「" + pet.name + "」已创建！（已使用即梦 AI 形象）\n正在后台生成短视频，完成后会提示。",
+            )
             self.accept()
+            # 图生图完成后直接调用图生视频，用生成的 AI 图做首尾帧，保存到专用目录
+            if I2VWorker is not None and JIMENG_ACCESS_KEY and JIMENG_SECRET_KEY:
+                ensure_dirs()
+                self._i2v_worker = I2VWorker(
+                    avatar_path, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR
+                )
+                self._i2v_worker.finished_success.connect(self._on_i2v_success)
+                self._i2v_worker.finished_fail.connect(self._on_i2v_fail)
+                self._i2v_worker.start()
         else:
             QMessageBox.warning(self, "失败", "创建桌宠失败，请重试")
             self._btn_create.setEnabled(True)
+
+    def _on_i2v_success(self, video_path: str) -> None:
+        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}")
+
+    def _on_i2v_fail(self, err: str) -> None:
+        QMessageBox.warning(None, "短视频生成未完成", err)
 
     def _on_jimeng_fail(self, err: str) -> None:
         import sys

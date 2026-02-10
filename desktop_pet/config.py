@@ -11,6 +11,7 @@ ALBUMS_DIR = DATA_DIR / "albums"
 HEALTH_DATA_DIR = DATA_DIR / "health"
 AUTH_DATA_DIR = DATA_DIR / "auth"  # 用户与登录
 AVATARS_DIR = DATA_DIR / "avatars"  # 用户上传/生成的猫咪形象
+VIDEOS_DIR = DATA_DIR / "videos"    # 即梦图生视频保存目录
 VOICE_DATA_DIR = DATA_DIR / "voice"  # 主人声音样本（供后续克隆/TTS）
 VOICE_SAMPLES_DIR = VOICE_DATA_DIR / "samples"  # 按用户 ID 存录音
 
@@ -36,5 +37,5 @@ JIMENG_SECRET_KEY = os.getenv("JIMENG_SECRET_KEY")
 
 def ensure_dirs() -> None:
     """确保数据目录存在。"""
-    for d in (DATA_DIR, PROFILES_DIR, ALBUMS_DIR, HEALTH_DATA_DIR, AUTH_DATA_DIR, AVATARS_DIR, VOICE_DATA_DIR, VOICE_SAMPLES_DIR):
+    for d in (DATA_DIR, PROFILES_DIR, ALBUMS_DIR, HEALTH_DATA_DIR, AUTH_DATA_DIR, AVATARS_DIR, VIDEOS_DIR, VOICE_DATA_DIR, VOICE_SAMPLES_DIR):
         d.mkdir(parents=True, exist_ok=True)
