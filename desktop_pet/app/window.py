@@ -4,13 +4,17 @@ from typing import Callable, Optional
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, QUrl
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPixmap
-from PyQt6.QtWidgets import QApplication, QWidget, QPushButton
+from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox
 
 from desktop_pet.config import (
     WINDOW_ALWAYS_ON_TOP,
     WINDOW_FRAMELESS,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
+    VIDEOS_DIR,
+    JIMENG_ACCESS_KEY,
+    JIMENG_SECRET_KEY,
+    ensure_dirs,
 )
 from desktop_pet.app.pet_actor import PetState, next_state_on_detection
 
@@ -42,6 +46,14 @@ try:
     _HAS_AVATAR_GEN = True
 except Exception:
     _HAS_AVATAR_GEN = False
+
+# 可选：图生视频 Worker（由窗口持有，避免弹窗关闭时 QThread 被销毁）
+try:
+    from desktop_pet.jimeng.i2v_worker import I2VWorker
+    _HAS_I2V = True
+except Exception:
+    _HAS_I2V = False
+    I2VWorker = None
 
 
 class PetWindow(QWidget):
@@ -154,6 +166,14 @@ class PetWindow(QWidget):
             self._pet.video_path = path
             if self._profile_store:
                 self._profile_store.save(self._pet)
+        # 已有视频控件时只更新源与尺寸（已注册用户重新生成视频后能播新文件）
+        if self._video_widget is not None and self._media_player is not None:
+            self._media_player.setSource(QUrl.fromLocalFile(path))
+            self._update_video_widget_geometry()
+            self._media_player.pause()
+            self._video_widget.hide()
+            self.update()
+            return
         self._setup_video(path)
 
     def _update_video_widget_geometry(self) -> None:
@@ -177,10 +197,20 @@ class PetWindow(QWidget):
         self._video_widget.setGeometry(vx, vy, vw, vh)
 
     def _check_pet_video_path(self) -> None:
-        """轮询宠物档案中的 video_path，若新写入则内嵌播放并停止轮询。"""
+        """轮询宠物档案中的 video_path（内存 + 磁盘），若新写入则内嵌播放并停止轮询。"""
         if not self._pet or not _HAS_VIDEO or self._video_widget is not None:
             return
         path = getattr(self._pet, "video_path", None)
+        # 内存无 path 时从档案重新加载，确保生成后的视频与当前账号绑定
+        if not path and self._profile_store:
+            try:
+                fresh = self._profile_store.load(self._pet.id)
+                if fresh:
+                    path = getattr(fresh, "video_path", None)
+                    if path:
+                        self._pet.video_path = path
+            except Exception:
+                pass
         if path and Path(str(path)).exists():
             if getattr(self, "_video_poll_timer", None):
                 self._video_poll_timer.stop()
@@ -243,7 +273,29 @@ class PetWindow(QWidget):
                 self.set_avatar_path,
                 Qt.ConnectionType.DirectConnection,
             )
+            # 图生视频由窗口持有 Worker，避免弹窗关闭后 QThread 被销毁导致崩溃
+            dlg.startI2vRequested.connect(self._on_start_i2v)
             dlg.exec()
+
+    def _on_start_i2v(self, avatar_path: str) -> None:
+        """由形象弹窗发出；在窗口内创建并持有 I2VWorker，避免弹窗关闭后线程被销毁。"""
+        if not _HAS_I2V or I2VWorker is None or not JIMENG_ACCESS_KEY or not JIMENG_SECRET_KEY:
+            return
+        ensure_dirs()
+        worker = I2VWorker(avatar_path, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR, parent=self)
+        worker.finished_success.connect(self._on_i2v_success)
+        worker.finished_fail.connect(self._on_i2v_fail)
+        worker.start()
+
+    def _on_i2v_success(self, video_path: str) -> None:
+        if self._pet and self._profile_store:
+            self._pet.video_path = video_path
+            self._profile_store.save(self._pet)
+        self.set_video_path(video_path)
+        QMessageBox.information(self, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
+
+    def _on_i2v_fail(self, err: str) -> None:
+        QMessageBox.warning(self, "短视频生成未完成", err)
 
     def _on_speak(self) -> None:
         if _HAS_VOICE and self._tts_engine is not None:
@@ -253,6 +305,26 @@ class PetWindow(QWidget):
     def _on_back_to_welcome(self) -> None:
         self.returnToWelcomeRequested.emit()
         self.close()
+
+    def showEvent(self, event) -> None:
+        """窗口显示时同步一次档案中的 video_path，确保新生成的视频与当前账号绑定。"""
+        super().showEvent(event)
+        if self._video_widget is not None or not self._pet or not _HAS_VIDEO:
+            return
+        path = getattr(self._pet, "video_path", None)
+        if not path and self._profile_store:
+            try:
+                fresh = self._profile_store.load(self._pet.id)
+                if fresh:
+                    path = getattr(fresh, "video_path", None)
+                    if path:
+                        self._pet.video_path = path
+            except Exception:
+                pass
+        if path and Path(str(path)).exists():
+            self._setup_video(str(path))
+            if getattr(self, "_video_poll_timer", None):
+                self._video_poll_timer.stop()
 
     def _start_idle_animations(self) -> None:
         """待机：每隔几秒眨眼（已移除上下弹跳动效）。"""

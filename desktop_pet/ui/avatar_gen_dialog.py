@@ -56,6 +56,7 @@ class JimengWorker(QThread):
 class AvatarGenDialog(QDialog):
     """用即梦为当前宠物生成 AI 分身形象，生成后可替换桌宠头像。"""
     avatarUpdated = pyqtSignal(str)  # 新 avatar_path，供主窗口更新显示
+    startI2vRequested = pyqtSignal(str)  # 图生图成功后请求窗口启动图生视频（路径由窗口持有，避免弹窗销毁导致 QThread 崩溃）
 
     def __init__(
         self,
@@ -128,27 +129,9 @@ class AvatarGenDialog(QDialog):
         if parent is not None:
             parent.raise_()
             parent.activateWindow()
-        # 图生图完成后用生成的 AI 图调用图生视频，保存到专用目录
-        if _HAS_I2V and I2VWorker and JIMENG_ACCESS_KEY and JIMENG_SECRET_KEY:
-            ensure_dirs()
-            self._i2v_worker = I2VWorker(
-                new_path_abs, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR
-            )
-            self._i2v_worker.finished_success.connect(self._on_i2v_success)
-            self._i2v_worker.finished_fail.connect(self._on_i2v_fail)
-            self._i2v_worker.start()
-
-    def _on_i2v_success(self, video_path: str) -> None:
-        if self._pet:
-            self._pet.video_path = video_path
-            self._store.save(self._pet)
-        parent = self.parent()
-        if parent is not None and hasattr(parent, "set_video_path"):
-            parent.set_video_path(video_path)
-        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
-
-    def _on_i2v_fail(self, err: str) -> None:
-        QMessageBox.warning(None, "短视频生成未完成", err)
+        # 由桌宠窗口持有并启动图生视频，避免弹窗关闭后 QThread 被销毁导致崩溃
+        if _HAS_I2V and JIMENG_ACCESS_KEY and JIMENG_SECRET_KEY:
+            self.startI2vRequested.emit(new_path_abs)
 
     def _on_fail(self, err: str) -> None:
         self._progress.setVisible(False)

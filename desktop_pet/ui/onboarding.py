@@ -184,6 +184,17 @@ class OnboardingDialog(QDialog):
         if self._pet:
             self._pet.video_path = video_path
             self._store.save(self._pet)
+            # 主动通知当前桌宠窗口绑定新视频（新用户创建后窗口已打开，仅靠轮询可能漏掉）
+            from PyQt6.QtWidgets import QApplication
+            try:
+                from desktop_pet.app.window import PetWindow
+                for w in QApplication.topLevelWidgets():
+                    if isinstance(w, PetWindow) and getattr(w, "_pet", None) is not None:
+                        if getattr(w._pet, "id", None) == self._pet.id:
+                            w.set_video_path(video_path)
+                            break
+            except Exception:
+                pass
         QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
 
     def _on_i2v_fail(self, err: str) -> None:
