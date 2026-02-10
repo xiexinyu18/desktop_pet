@@ -16,6 +16,7 @@ data/albums/
 data/auth/
 data/avatars/
 data/voice/
+data/jimeng_last_response.json
 *.db
 *.sqlite3
 

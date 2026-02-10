@@ -81,6 +81,8 @@ def main() -> None:
             on_detection=on_detection,
             tts_engine=tts_engine,
             user_id=user.id,
+            pet=pet,
+            profile_store=profile_store,
         )
         window.setWindowTitle(f"桌宠 - {pet.name}")
 

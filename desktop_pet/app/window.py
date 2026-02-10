@@ -23,6 +23,13 @@ try:
 except Exception:
     _HAS_VOICE = False
 
+# 可选：宠物形象生成（即梦）
+try:
+    from desktop_pet.ui.avatar_gen_dialog import AvatarGenDialog
+    _HAS_AVATAR_GEN = True
+except Exception:
+    _HAS_AVATAR_GEN = False
+
 
 class PetWindow(QWidget):
     """桌面宠物窗口：无边框、置顶、可拖拽；支持头像图；待机眨眼与轻微弹跳。"""
@@ -36,6 +43,8 @@ class PetWindow(QWidget):
         on_detection: Optional[Callable[[bool], None]] = None,
         tts_engine: Optional["TTSEngine"] = None,
         user_id: Optional[str] = None,
+        pet: Optional[object] = None,
+        profile_store: Optional[object] = None,
     ):
         super().__init__()
         self._width = width
@@ -45,6 +54,8 @@ class PetWindow(QWidget):
         self._on_detection = on_detection
         self._tts_engine = tts_engine
         self._user_id = user_id
+        self._pet = pet
+        self._profile_store = profile_store
         self._avatar: Optional[QPixmap] = None
         if avatar_path and Path(avatar_path).exists():
             self._avatar = QPixmap(avatar_path)
@@ -90,6 +101,37 @@ class PetWindow(QWidget):
             self._btn_speak.setGeometry(self._width - 34, 28, 26, 22)
             self._btn_speak.raise_()
             self._btn_speak.clicked.connect(self._on_speak)
+
+        # 宠物形象生成（即梦 AI 分身）
+        if _HAS_AVATAR_GEN and self._pet is not None and self._profile_store is not None:
+            self._btn_avatar_gen = QPushButton("形", self)
+            self._btn_avatar_gen.setFixedSize(26, 22)
+            self._btn_avatar_gen.setStyleSheet("font-size: 12px; border: 1px solid #ccc; border-radius: 4px; background: rgba(255,255,255,0.9);")
+            self._btn_avatar_gen.setToolTip("生成 AI 形象（即梦）")
+            self._btn_avatar_gen.setGeometry(self._width - 34, 52, 26, 22)
+            self._btn_avatar_gen.raise_()
+            self._btn_avatar_gen.clicked.connect(self._on_avatar_gen)
+
+    def set_avatar_path(self, path: str) -> None:
+        """更新桌宠头像（生成 AI 形象后调用），立即重绘以显示新图。"""
+        path = str(path).strip()
+        if not path or not Path(path).exists():
+            return
+        self._avatar = QPixmap(path)
+        if self._avatar.isNull():
+            self._avatar = None
+        self.update()
+        self.repaint()
+
+    def _on_avatar_gen(self) -> None:
+        if _HAS_AVATAR_GEN and self._pet is not None and self._profile_store is not None:
+            dlg = AvatarGenDialog(self._pet, self._profile_store, self)
+            # 用 DirectConnection 保证关闭弹窗前就更新头像并重绘，桌宠立即显示新图
+            dlg.avatarUpdated.connect(
+                self.set_avatar_path,
+                Qt.ConnectionType.DirectConnection,
+            )
+            dlg.exec()
 
     def _on_speak(self) -> None:
         if _HAS_VOICE and self._tts_engine is not None:

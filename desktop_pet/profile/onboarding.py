@@ -28,11 +28,22 @@ def create_pet_from_photo(
     pet_name: str,
     profile_store: Optional[ProfileStore] = None,
 ) -> Optional[PetProfile]:
-    """用上传的猫咪照片创建宠物档案（MVP：直接使用照片作为形象；后续可接入 AI 生成）。"""
+    """用上传的猫咪照片创建宠物档案（复制照片到头像目录）。"""
     store = profile_store or ProfileStore()
     avatar_path = save_avatar_from_path(user_id, photo_path)
     if not avatar_path:
         return None
+    return create_pet_with_avatar(user_id, avatar_path, pet_name, store)
+
+
+def create_pet_with_avatar(
+    user_id: str,
+    avatar_path: str,
+    pet_name: str,
+    profile_store: Optional[ProfileStore] = None,
+) -> Optional[PetProfile]:
+    """用已有头像路径创建宠物档案（不复制文件，用于即梦生成图等）。"""
+    store = profile_store or ProfileStore()
     pet_id = f"pet_{user_id}_{uuid.uuid4().hex[:8]}"
     profile = PetProfile(
         id=pet_id,

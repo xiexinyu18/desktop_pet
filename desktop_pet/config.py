@@ -1,4 +1,5 @@
 """桌宠全局配置与路径。"""
+import os
 from pathlib import Path
 
 # 项目根目录（desktop_pet 包所在目录的上一级）
@@ -27,6 +28,10 @@ CAMERA_DETECT_INTERVAL_MS = 500
 FEED_REMIND_INTERVAL = 360  # 6 小时
 GROOM_REMIND_INTERVAL = 10080  # 7 天
 LITTER_REMIND_INTERVAL = 1440  # 1 天
+
+# 即梦（火山引擎）图生图：可从环境变量 JIMENG_ACCESS_KEY / JIMENG_SECRET_KEY 覆盖
+JIMENG_ACCESS_KEY = os.getenv("JIMENG_ACCESS_KEY")
+JIMENG_SECRET_KEY = os.getenv("JIMENG_SECRET_KEY")
 
 
 def ensure_dirs() -> None:

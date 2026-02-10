@@ -7,3 +7,6 @@ pydantic>=2.0.0
 # 主人声音录入与 TTS（与宠物对话）
 pyttsx3>=2.90
 sounddevice>=0.4.6
+
+# 即梦图生图（宠物 AI 形象）
+requests>=2.28.0

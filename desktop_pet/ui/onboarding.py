@@ -1,4 +1,5 @@
-"""注册后引导：上传猫咪照片 → 生成 AI 形象 → 填写名字，创建桌宠。"""
+"""注册后引导：上传猫咪照片 → 生成 AI 形象（即梦）→ 填写名字，创建桌宠。"""
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -13,16 +14,51 @@ from PyQt6.QtWidgets import (
     QWidget,
     QProgressBar,
 )
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from desktop_pet.auth.models import User
+from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, ensure_dirs
 from desktop_pet.profile.models import PetProfile
-from desktop_pet.profile.onboarding import create_pet_from_photo
+from desktop_pet.profile.onboarding import create_pet_from_photo, create_pet_with_avatar
 from desktop_pet.profile.store import ProfileStore
+
+try:
+    from desktop_pet.jimeng.client import JimengClient
+    _HAS_JIMENG = True
+except Exception as e:
+    import sys
+    print(f"[桌宠-引导] 即梦模块导入失败: {e}", file=sys.stderr, flush=True)
+    _HAS_JIMENG = False
+
+
+class JimengOnboardingWorker(QThread):
+    """创建桌宠时在后台调用即梦生成 AI 形象。"""
+    finished_success = pyqtSignal(str)   # 生成图保存路径
+    finished_fail = pyqtSignal(str)      # 错误信息
+
+    def __init__(self, photo_path: Path, access_key: str, secret_key: str):
+        super().__init__()
+        self._photo_path = photo_path
+        self._access_key = access_key
+        self._secret_key = secret_key
+
+    def run(self) -> None:
+        try:
+            client = JimengClient(self._access_key, self._secret_key)
+            out, err = client.image_to_image(self._photo_path)
+            if out:
+                ensure_dirs()
+                dest = AVATARS_DIR / f"jimeng_{uuid.uuid4().hex[:12]}.png"
+                dest.write_bytes(out)
+                self.finished_success.emit(str(dest.resolve()))
+            else:
+                self.finished_fail.emit(err or "即梦未返回图片")
+        except Exception as e:
+            self.finished_fail.emit(f"生成异常: {e}")
 
 
 class OnboardingDialog(QDialog):
-    """上传猫咪照片 → 生成形象（MVP 直接使用照片）→ 输入名字 → 创建宠物。"""
+    """上传猫咪照片 → 点击「生成桌宠」调即梦生成 AI 形象 → 输入名字 → 创建宠物。"""
 
     def __init__(self, user: User, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -83,24 +119,87 @@ class OnboardingDialog(QDialog):
         name = self._name_edit.text().strip() or "我的小猫"
         self._btn_create.setEnabled(False)
         self._progress.setVisible(True)
-        # MVP：直接创建，无真实 AI；用定时器模拟“生成中”
-        QTimer.singleShot(800, self._finish_create)
+        self._label_photo.setText("正在生成桌宠形象…")
+        # 调试：打印即梦状态
+        import sys
+        print(f"[桌宠-引导] 点击「生成桌宠」", file=sys.stderr, flush=True)
+        print(f"[桌宠-引导] _HAS_JIMENG={_HAS_JIMENG}, JIMENG_ACCESS_KEY={'有' if JIMENG_ACCESS_KEY else '无'}, JIMENG_SECRET_KEY={'有' if JIMENG_SECRET_KEY else '无'}", file=sys.stderr, flush=True)
+        # 有即梦且已配置密钥：先调即梦生成 AI 形象，再创建桌宠
+        if _HAS_JIMENG and JIMENG_ACCESS_KEY and JIMENG_SECRET_KEY:
+            print("[桌宠-引导] 开始调用即梦生成 AI 形象...", file=sys.stderr, flush=True)
+            self._worker = JimengOnboardingWorker(
+                self._photo_path, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY
+            )
+            self._worker.finished_success.connect(self._on_jimeng_success)
+            self._worker.finished_fail.connect(self._on_jimeng_fail)
+            self._worker.start()
+        else:
+            # 无即梦或未配置：直接用原图创建
+            reason = []
+            if not _HAS_JIMENG:
+                reason.append("即梦模块未导入")
+            if not JIMENG_ACCESS_KEY:
+                reason.append("未配置 ACCESS_KEY")
+            if not JIMENG_SECRET_KEY:
+                reason.append("未配置 SECRET_KEY")
+            print(f"[桌宠-引导] 跳过即梦，原因: {', '.join(reason)}，将用原图创建", file=sys.stderr, flush=True)
+            self._finish_create_with_photo()
 
-    def _finish_create(self) -> None:
+    def _on_jimeng_success(self, avatar_path: str) -> None:
+        import sys
+        print(f"[桌宠-引导] 即梦生成成功，头像路径: {avatar_path}", file=sys.stderr, flush=True)
         self._progress.setVisible(False)
+        self._btn_create.setEnabled(True)
+        self._label_photo.setText("已选择：" + self._photo_path.name)
+        pet = create_pet_with_avatar(
+            self._user.id,
+            avatar_path,
+            self._name_edit.text().strip() or "我的小猫",
+            self._store,
+        )
+        if pet:
+            self._pet = pet
+            QMessageBox.information(self, "完成", f"桌宠「{pet.name}」已创建！（已使用即梦 AI 形象）")
+            self.accept()
+        else:
+            QMessageBox.warning(self, "失败", "创建桌宠失败，请重试")
+            self._btn_create.setEnabled(True)
+
+    def _on_jimeng_fail(self, err: str) -> None:
+        import sys
+        print(f"[桌宠-引导] 即梦生成失败: {err}", file=sys.stderr, flush=True)
+        self._progress.setVisible(False)
+        self._btn_create.setEnabled(True)
+        self._label_photo.setText("已选择：" + self._photo_path.name)
+        # 即梦失败则用原图创建
+        QMessageBox.warning(
+            self,
+            "AI 形象生成未成功",
+            f"即梦生成失败，将使用原图创建桌宠。\n\n{err}",
+        )
+        self._finish_create_with_photo()
+
+    def _finish_create_with_photo(self) -> None:
+        """用原图创建桌宠（即梦未用或失败时的回退）。"""
+        import sys
+        print("[桌宠-引导] 使用原图创建桌宠", file=sys.stderr, flush=True)
+        self._progress.setVisible(True)
+        self._label_photo.setText("正在创建桌宠…")
         pet = create_pet_from_photo(
             self._user.id,
             self._photo_path,
             self._name_edit.text().strip() or "我的小猫",
             self._store,
         )
+        self._progress.setVisible(False)
+        self._btn_create.setEnabled(True)
+        self._label_photo.setText("已选择：" + self._photo_path.name)
         if pet:
             self._pet = pet
             QMessageBox.information(self, "完成", f"桌宠「{pet.name}」已创建！")
             self.accept()
         else:
             QMessageBox.warning(self, "失败", "创建桌宠失败，请重试")
-            self._btn_create.setEnabled(True)
 
     def pet(self) -> Optional[PetProfile]:
         return self._pet
