@@ -17,20 +17,18 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from desktop_pet.auth.models import User
-from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR, ensure_dirs
+from desktop_pet.config import AVATARS_DIR, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, ensure_dirs
 from desktop_pet.profile.models import PetProfile
 from desktop_pet.profile.onboarding import create_pet_from_photo, create_pet_with_avatar
 from desktop_pet.profile.store import ProfileStore
 
 try:
     from desktop_pet.jimeng.client import JimengClient
-    from desktop_pet.jimeng.i2v_worker import I2VWorker
     _HAS_JIMENG = True
 except Exception as e:
     import sys
     print(f"[桌宠-引导] 即梦模块导入失败: {e}", file=sys.stderr, flush=True)
     _HAS_JIMENG = False
-    I2VWorker = None
 
 
 class JimengOnboardingWorker(QThread):
@@ -67,6 +65,7 @@ class OnboardingDialog(QDialog):
         self._user = user
         self._photo_path: Optional[Path] = None
         self._pet: Optional[PetProfile] = None
+        self._pending_i2v_avatar_path: Optional[str] = None  # 图生图成功后，由窗口持有 Worker 启动图生视频
         self._store = ProfileStore()
         self.setup_ui()
 
@@ -167,38 +166,15 @@ class OnboardingDialog(QDialog):
                 "桌宠「" + pet.name + "」已创建！（已使用即梦 AI 形象）\n正在后台生成短视频，完成后会提示。",
             )
             self.accept()
-            # 图生图完成后直接调用图生视频，用生成的 AI 图做首尾帧，保存到专用目录
-            if I2VWorker is not None and JIMENG_ACCESS_KEY and JIMENG_SECRET_KEY:
-                ensure_dirs()
-                self._i2v_worker = I2VWorker(
-                    avatar_path, JIMENG_ACCESS_KEY, JIMENG_SECRET_KEY, VIDEOS_DIR
-                )
-                self._i2v_worker.finished_success.connect(self._on_i2v_success)
-                self._i2v_worker.finished_fail.connect(self._on_i2v_fail)
-                self._i2v_worker.start()
+            # 图生视频由 PetWindow 持有 Worker 启动，避免用户返回欢迎页时弹窗被 GC 导致崩溃
+            self._pending_i2v_avatar_path = avatar_path
         else:
             QMessageBox.warning(self, "失败", "创建桌宠失败，请重试")
             self._btn_create.setEnabled(True)
 
-    def _on_i2v_success(self, video_path: str) -> None:
-        if self._pet:
-            self._pet.video_path = video_path
-            self._store.save(self._pet)
-            # 主动通知当前桌宠窗口绑定新视频（新用户创建后窗口已打开，仅靠轮询可能漏掉）
-            from PyQt6.QtWidgets import QApplication
-            try:
-                from desktop_pet.app.window import PetWindow
-                for w in QApplication.topLevelWidgets():
-                    if isinstance(w, PetWindow) and getattr(w, "_pet", None) is not None:
-                        if getattr(w._pet, "id", None) == self._pet.id:
-                            w.set_video_path(video_path)
-                            break
-            except Exception:
-                pass
-        QMessageBox.information(None, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
-
-    def _on_i2v_fail(self, err: str) -> None:
-        QMessageBox.warning(None, "短视频生成未完成", err)
+    def pending_i2v_avatar_path(self) -> Optional[str]:
+        """即梦图生图成功后待启动图生视频的头像路径，由 main 创建 PetWindow 后调用其 _on_start_i2v 启动。"""
+        return self._pending_i2v_avatar_path
 
     def _on_jimeng_fail(self, err: str) -> None:
         import sys

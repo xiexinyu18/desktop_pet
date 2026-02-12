@@ -55,12 +55,14 @@ def main() -> None:
         my_pets = profile_store.list_by_owner(user.id)
         pet = my_pets[0] if my_pets else None
 
+        used_onboarding = False
         if not pet:
             # 首次：引导上传猫咪照片并创建桌宠；可点「返回」回到欢迎页
             onboarding = OnboardingDialog(user)
             if onboarding.exec() != onboarding.DialogCode.Accepted:
                 continue
             pet = onboarding.pet()
+            used_onboarding = True
         if not pet:
             continue
 
@@ -85,6 +87,12 @@ def main() -> None:
             profile_store=profile_store,
         )
         window.setWindowTitle(f"桌宠 - {pet.name}")
+
+        # 引导流程中即梦图生图成功后，由窗口持有 Worker 启动图生视频，避免返回欢迎页时崩溃
+        if used_onboarding and pet:
+            pending_i2v = onboarding.pending_i2v_avatar_path()
+            if pending_i2v:
+                window._on_start_i2v(pending_i2v)
 
         detector = CameraDetector(interval_ms=CAMERA_DETECT_INTERVAL_MS)
         timer = QTimer(window)
