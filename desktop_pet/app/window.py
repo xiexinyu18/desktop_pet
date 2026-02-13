@@ -87,6 +87,7 @@ class PetWindow(QWidget):
             if self._avatar.isNull():
                 self._avatar = None
         self._eyes_closed = False
+        self._last_pet_detected = False  # 用于「人刚出现」时播视频，避免人一直在就反复播导致内存泄漏
         self._video_widget: Optional[QWidget] = None
         self._media_player = None
         self.setup_ui()
@@ -349,11 +350,12 @@ class PetWindow(QWidget):
 
     def update_detection(self, pet_detected: bool) -> None:
         self._state = next_state_on_detection(self._state, pet_detected)
-        # 仅检测到人时触发播放；一旦开始播放不因检测丢失而中断，播完再切回静态图
+        # 仅在人「刚出现」时触发播放（从未检测到→检测到），避免人一直在就反复播导致内存泄漏
         if self._video_widget is not None and self._media_player is not None:
-            if pet_detected and not self._video_widget.isVisible():
+            if pet_detected and not self._last_pet_detected and not self._video_widget.isVisible():
                 self._video_widget.show()
                 self._media_player.play()
+        self._last_pet_detected = pet_detected
         self.update()
         if self._on_detection:
             self._on_detection(pet_detected)
