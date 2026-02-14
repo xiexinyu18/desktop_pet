@@ -10,3 +10,5 @@ sounddevice>=0.4.6
 
 # 即梦图生图（宠物 AI 形象）
 requests>=2.28.0
+
+# 视频转 GIF：直接用 ffmpeg（brew install ffmpeg），不再依赖 moviepy

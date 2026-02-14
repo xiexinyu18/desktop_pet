@@ -12,6 +12,7 @@ HEALTH_DATA_DIR = DATA_DIR / "health"
 AUTH_DATA_DIR = DATA_DIR / "auth"  # 用户与登录
 AVATARS_DIR = DATA_DIR / "avatars"  # 用户上传/生成的猫咪形象
 VIDEOS_DIR = DATA_DIR / "videos"    # 即梦图生视频保存目录
+GIFS_DIR = DATA_DIR / "gifs"       # 视频转 GIF 缓存，与视频路径一一映射
 VOICE_DATA_DIR = DATA_DIR / "voice"  # 主人声音样本（供后续克隆/TTS）
 VOICE_SAMPLES_DIR = VOICE_DATA_DIR / "samples"  # 按用户 ID 存录音
 
@@ -34,8 +35,11 @@ LITTER_REMIND_INTERVAL = 1440  # 1 天
 JIMENG_ACCESS_KEY = os.getenv("JIMENG_ACCESS_KEY")
 JIMENG_SECRET_KEY = os.getenv("JIMENG_SECRET_KEY")
 
+# 动效播放：True=用 GIF（无内存泄漏），False=用视频（若 GIF 效果不好可改回 False 回滚）
+USE_GIF_PLAYBACK = True
+
 
 def ensure_dirs() -> None:
     """确保数据目录存在。"""
-    for d in (DATA_DIR, PROFILES_DIR, ALBUMS_DIR, HEALTH_DATA_DIR, AUTH_DATA_DIR, AVATARS_DIR, VIDEOS_DIR, VOICE_DATA_DIR, VOICE_SAMPLES_DIR):
+    for d in (DATA_DIR, PROFILES_DIR, ALBUMS_DIR, HEALTH_DATA_DIR, AUTH_DATA_DIR, AVATARS_DIR, VIDEOS_DIR, GIFS_DIR, VOICE_DATA_DIR, VOICE_SAMPLES_DIR):
         d.mkdir(parents=True, exist_ok=True)

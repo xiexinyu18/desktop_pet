@@ -5,12 +5,13 @@ from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 
 from desktop_pet.jimeng.i2v_client import generate_video_from_image
+from desktop_pet.jimeng.video_to_gif import video_to_gif
 
 
 class I2VWorker(QThread):
-    """用一张图（通常为图生图生成的 AI 图）生成短视频，保存到指定目录。"""
-    finished_success = pyqtSignal(str)  # 视频保存路径
-    finished_fail = pyqtSignal(str)     # 错误信息
+    """用一张图（通常为图生图生成的 AI 图）生成短视频，保存到指定目录，并转为 GIF。"""
+    finished_success = pyqtSignal(str, str)  # (video_path, gif_path)，gif_path 为空表示转换失败
+    finished_fail = pyqtSignal(str)          # 错误信息
 
     def __init__(
         self,
@@ -34,6 +35,9 @@ class I2VWorker(QThread):
             self._save_dir,
         )
         if path is not None:
-            self.finished_success.emit(str(path.resolve()))
+            video_path = str(path.resolve())
+            gif_path_obj = video_to_gif(path)
+            gif_path = str(gif_path_obj.resolve()) if gif_path_obj else ""
+            self.finished_success.emit(video_path, gif_path)
         else:
             self.finished_fail.emit("图生视频失败或超时")

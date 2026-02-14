@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal, QUrl
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPixmap
-from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPixmap, QMovie
+from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QLabel
 
 from desktop_pet.config import (
     WINDOW_ALWAYS_ON_TOP,
@@ -14,6 +14,7 @@ from desktop_pet.config import (
     VIDEOS_DIR,
     JIMENG_ACCESS_KEY,
     JIMENG_SECRET_KEY,
+    USE_GIF_PLAYBACK,
     ensure_dirs,
 )
 from desktop_pet.app.pet_actor import PetState, next_state_on_detection
@@ -55,6 +56,14 @@ except Exception:
     _HAS_I2V = False
     I2VWorker = None
 
+# 可选：已有视频转 GIF Worker
+try:
+    from desktop_pet.jimeng.video_to_gif import VideoToGifWorker
+    _HAS_VIDEO_TO_GIF = True
+except Exception:
+    _HAS_VIDEO_TO_GIF = False
+    VideoToGifWorker = None
+
 
 class PetWindow(QWidget):
     """桌面宠物窗口：无边框、置顶、可拖拽；支持头像图；待机眨眼与轻微弹跳。"""
@@ -90,12 +99,16 @@ class PetWindow(QWidget):
         self._last_pet_detected = False  # 用于「人刚出现」时播视频，避免人一直在就反复播导致内存泄漏
         self._video_widget: Optional[QWidget] = None
         self._media_player = None
+        self._gif_label: Optional[QLabel] = None
+        self._gif_movie: Optional[QMovie] = None
+        self._use_gif = False  # True=用 GIF 播放，False=用视频
         self.setup_ui()
-        # 若有宠物且已有视频路径，直接内嵌播放；否则启动轮询（i2v 完成后会写入 pet.video_path）
+        # 若有宠物且已有视频/GIF 路径，直接内嵌播放；否则启动轮询（i2v 完成后会写入 pet.video_path）
         video_path = getattr(pet, "video_path", None) if pet else None
+        gif_path = getattr(pet, "gif_path", None) if pet else None
         if video_path and Path(str(video_path)).exists():
-            self._setup_video(str(video_path))
-        elif _HAS_VIDEO and pet:
+            self._setup_media(str(video_path), gif_path)
+        elif (_HAS_VIDEO or USE_GIF_PLAYBACK) and pet:
             self._video_poll_timer = QTimer(self)
             self._video_poll_timer.timeout.connect(self._check_pet_video_path)
             self._video_poll_timer.start(2000)
@@ -155,27 +168,133 @@ class PetWindow(QWidget):
         if self._avatar.isNull():
             self._avatar = None
         self._update_video_widget_geometry()
+        self._update_gif_widget_geometry()
         self.update()
         self.repaint()
 
-    def set_video_path(self, path: str) -> None:
-        """设置并播放即梦短视频（图生视频完成后由弹窗或轮询调用）。"""
-        path = str(path).strip()
-        if not path or not Path(path).exists():
+    def set_video_path(self, video_path: str, gif_path: Optional[str] = None) -> None:
+        """设置即梦短视频/GIF（图生视频完成后由弹窗或轮询调用）。优先用 GIF 若 USE_GIF_PLAYBACK。"""
+        video_path = str(video_path).strip()
+        if not video_path or not Path(video_path).exists():
             return
+        gif_path = str(gif_path).strip() if gif_path else None
+        if gif_path and not Path(gif_path).exists():
+            gif_path = None
         if getattr(self, "_pet", None):
-            self._pet.video_path = path
+            self._pet.video_path = video_path
+            self._pet.gif_path = gif_path
             if self._profile_store:
                 self._profile_store.save(self._pet)
-        # 已有视频控件时只更新源与尺寸（已注册用户重新生成视频后能播新文件）
+        # 已有控件时只更新源与尺寸；强制重新加载以支持同路径覆盖后的新内容
+        if self._use_gif and self._gif_label is not None and self._gif_movie is not None and gif_path:
+            self._gif_movie.stop()
+            self._gif_movie.setFileName("")
+            self._gif_movie.setFileName(gif_path)
+            self._update_gif_widget_geometry()
+            self._gif_label.hide()
+            self.update()
+            return
         if self._video_widget is not None and self._media_player is not None:
-            self._media_player.setSource(QUrl.fromLocalFile(path))
+            self._media_player.setSource(QUrl.fromLocalFile(video_path))
             self._update_video_widget_geometry()
             self._media_player.pause()
             self._video_widget.hide()
             self.update()
             return
-        self._setup_video(path)
+        self._setup_media(video_path, gif_path)
+
+    def _setup_media(self, video_path: str, gif_path: Optional[str] = None) -> None:
+        """根据配置选择 GIF 或视频播放。USE_GIF_PLAYBACK 且 gif 存在时用 GIF，否则用视频。"""
+        if USE_GIF_PLAYBACK and gif_path and Path(str(gif_path)).exists():
+            self._setup_gif(str(gif_path))
+        elif _HAS_VIDEO:
+            self._setup_video(str(video_path))
+            # 已有视频无 GIF 时，后台转换；转换完成后自动切换为 GIF 并提示耗时
+            if USE_GIF_PLAYBACK and _HAS_VIDEO_TO_GIF and VideoToGifWorker is not None:
+                self._start_convert_video_to_gif(str(video_path))
+
+    def _setup_gif(self, path: str) -> None:
+        """内嵌 GIF 播放：QLabel + QMovie，播完一遍后隐藏（与视频一致）。"""
+        if not Path(path).exists():
+            return
+        if self._gif_label is not None:
+            return
+        self._gif_label = QLabel(self)
+        self._gif_movie = QMovie(path)
+        self._gif_movie.setCacheMode(QMovie.CacheMode.CacheAll)
+        # Qt6 QMovie 无 setLoopCount，由 GIF 文件内 loop 决定；video_to_gif 已写 loop=0（播一遍）
+        self._gif_movie.finished.connect(self._on_gif_finished)
+        self._gif_label.setMovie(self._gif_movie)
+        self._gif_label.setStyleSheet("background: transparent;")
+        self._gif_label.setScaledContents(True)
+        self._update_gif_widget_geometry()
+        self._gif_label.lower()
+        self._gif_label.hide()
+        self._gif_movie.stop()
+        self._use_gif = True
+        self.update()
+
+    def _on_gif_finished(self) -> None:
+        """GIF 播完一遍后隐藏，切回静态图。"""
+        if self._gif_label is not None and self._gif_movie is not None:
+            self._gif_movie.stop()
+            self._gif_label.hide()
+            self.update()
+
+    def _update_gif_widget_geometry(self) -> None:
+        """按头像图片实际显示尺寸与位置设置 GIF 区域。"""
+        if self._gif_label is None:
+            return
+        content_w = self._width - 2 * CONTENT_MARGIN
+        content_h = self._height - 2 * CONTENT_MARGIN
+        if self._avatar and not self._avatar.isNull():
+            scaled = self._avatar.scaled(
+                content_w, content_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            vw, vh = scaled.width(), scaled.height()
+            vx = (self._width - vw) // 2
+            vy = (self._height - vh) // 2
+        else:
+            vx, vy = CONTENT_MARGIN, CONTENT_MARGIN
+            vw, vh = content_w, content_h
+        self._gif_label.setGeometry(vx, vy, vw, vh)
+
+    def _start_convert_video_to_gif(self, video_path: str) -> None:
+        """后台将已有视频转为 GIF，转换完成后切换为 GIF 播放并提示耗时。"""
+        if not _HAS_VIDEO_TO_GIF or VideoToGifWorker is None:
+            return
+        worker = VideoToGifWorker(video_path, parent=self)
+        worker.finished_success.connect(self._on_convert_video_to_gif_success)
+        worker.finished_fail.connect(self._on_convert_video_to_gif_fail)
+        worker.start()
+
+    def _on_convert_video_to_gif_success(self, video_path: str, gif_path: str, elapsed: float) -> None:
+        """已有视频转 GIF 完成：销毁视频控件，切换为 GIF，保存档案，提示耗时。"""
+        # 销毁视频控件
+        if self._video_widget is not None:
+            if self._media_player is not None:
+                self._media_player.stop()
+                self._media_player.setSource(QUrl())
+                self._media_player = None
+            self._video_widget.deleteLater()
+            self._video_widget = None
+        self._use_gif = False
+        # 保存 gif_path 到档案
+        if self._pet and self._profile_store:
+            self._pet.gif_path = gif_path
+            self._profile_store.save(self._pet)
+        # 创建 GIF 控件
+        self._setup_gif(gif_path)
+        QMessageBox.information(
+            self,
+            "视频已转为 GIF",
+            f"转换完成，耗时 {elapsed:.1f} 秒。\n\nGIF 已保存，桌宠将使用 GIF 播放（避免内存泄漏）。",
+        )
+
+    def _on_convert_video_to_gif_fail(self, err: str) -> None:
+        QMessageBox.warning(self, "视频转 GIF 失败", err)
 
     def _update_video_widget_geometry(self) -> None:
         """按头像图片实际显示尺寸与位置设置视频区域（与 paintEvent 中 scaled 一致）。"""
@@ -198,24 +317,26 @@ class PetWindow(QWidget):
         self._video_widget.setGeometry(vx, vy, vw, vh)
 
     def _check_pet_video_path(self) -> None:
-        """轮询宠物档案中的 video_path（内存 + 磁盘），若新写入则内嵌播放并停止轮询。"""
-        if not self._pet or not _HAS_VIDEO or self._video_widget is not None:
+        """轮询宠物档案中的 video_path/gif_path，若新写入则内嵌播放并停止轮询。"""
+        if not self._pet or self._video_widget is not None or self._gif_label is not None:
             return
         path = getattr(self._pet, "video_path", None)
-        # 内存无 path 时从档案重新加载，确保生成后的视频与当前账号绑定
+        gif_path = getattr(self._pet, "gif_path", None)
         if not path and self._profile_store:
             try:
                 fresh = self._profile_store.load(self._pet.id)
                 if fresh:
                     path = getattr(fresh, "video_path", None)
+                    gif_path = getattr(fresh, "gif_path", None)
                     if path:
                         self._pet.video_path = path
+                        self._pet.gif_path = gif_path
             except Exception:
                 pass
         if path and Path(str(path)).exists():
             if getattr(self, "_video_poll_timer", None):
                 self._video_poll_timer.stop()
-            self._setup_video(str(path))
+            self._setup_media(str(path), str(gif_path) if gif_path else None)
 
     def _setup_video(self, path: str) -> None:
         """内嵌即梦短视频：QVideoWidget + QMediaPlayer，循环、静音，置于按钮下层。"""
@@ -224,7 +345,7 @@ class PetWindow(QWidget):
         path = str(path)
         if not Path(path).exists():
             return
-        if self._video_widget is not None:
+        if self._video_widget is not None or self._gif_label is not None:
             return
         self._video_widget = QVideoWidget(self)
         self._update_video_widget_geometry()
@@ -288,12 +409,17 @@ class PetWindow(QWidget):
         worker.finished_fail.connect(self._on_i2v_fail)
         worker.start()
 
-    def _on_i2v_success(self, video_path: str) -> None:
+    def _on_i2v_success(self, video_path: str, gif_path: str) -> None:
         if self._pet and self._profile_store:
             self._pet.video_path = video_path
+            self._pet.gif_path = gif_path if gif_path else None
             self._profile_store.save(self._pet)
-        self.set_video_path(video_path)
-        QMessageBox.information(self, "短视频", f"已保存至：\n{video_path}\n桌宠窗口将自动播放。")
+        self.set_video_path(video_path, gif_path if gif_path else None)
+        msg = f"已保存至：\n{video_path}"
+        if gif_path:
+            msg += f"\nGIF：{gif_path}"
+        msg += "\n桌宠窗口将自动播放。"
+        QMessageBox.information(self, "短视频", msg)
 
     def _on_i2v_fail(self, err: str) -> None:
         QMessageBox.warning(self, "短视频生成未完成", err)
@@ -308,22 +434,25 @@ class PetWindow(QWidget):
         self.close()
 
     def showEvent(self, event) -> None:
-        """窗口显示时同步一次档案中的 video_path，确保新生成的视频与当前账号绑定。"""
+        """窗口显示时同步一次档案中的 video_path/gif_path，确保新生成的与当前账号绑定。"""
         super().showEvent(event)
-        if self._video_widget is not None or not self._pet or not _HAS_VIDEO:
+        if (self._video_widget is not None or self._gif_label is not None) or not self._pet:
             return
         path = getattr(self._pet, "video_path", None)
+        gif_path = getattr(self._pet, "gif_path", None)
         if not path and self._profile_store:
             try:
                 fresh = self._profile_store.load(self._pet.id)
                 if fresh:
                     path = getattr(fresh, "video_path", None)
+                    gif_path = getattr(fresh, "gif_path", None)
                     if path:
                         self._pet.video_path = path
+                        self._pet.gif_path = gif_path
             except Exception:
                 pass
         if path and Path(str(path)).exists():
-            self._setup_video(str(path))
+            self._setup_media(str(path), str(gif_path) if gif_path else None)
             if getattr(self, "_video_poll_timer", None):
                 self._video_poll_timer.stop()
 
@@ -351,7 +480,12 @@ class PetWindow(QWidget):
     def update_detection(self, pet_detected: bool) -> None:
         self._state = next_state_on_detection(self._state, pet_detected)
         # 仅在人「刚出现」时触发播放（从未检测到→检测到），避免人一直在就反复播导致内存泄漏
-        if self._video_widget is not None and self._media_player is not None:
+        if self._use_gif and self._gif_label is not None and self._gif_movie is not None:
+            if pet_detected and not self._last_pet_detected and not self._gif_label.isVisible():
+                self._gif_label.show()
+                self._gif_movie.start()
+            # 不因人离开而中断，与视频一致：播完一遍再隐藏（由 finished 信号处理）
+        elif self._video_widget is not None and self._media_player is not None:
             if pet_detected and not self._last_pet_detected and not self._video_widget.isVisible():
                 self._video_widget.show()
                 self._media_player.play()
@@ -378,7 +512,9 @@ class PetWindow(QWidget):
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:
-        # 若正在播放内嵌短视频，不绘制头像，由 QVideoWidget 展示
+        # 若正在播放内嵌 GIF 或视频，不绘制头像
+        if self._gif_label is not None and self._gif_label.isVisible():
+            return
         if self._video_widget is not None and self._video_widget.isVisible():
             return
         painter = QPainter(self)
