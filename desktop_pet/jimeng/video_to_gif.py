@@ -31,13 +31,13 @@ def video_to_gif(video_path: str | Path, fps: int = 30, width: int = 320) -> Opt
     ensure_dirs()
     try:
         # 单次 ffmpeg 调用：palettegen + paletteuse 生成高质量 GIF
-        # -loop 1 = 播放一次（不无限循环）
+        # -loop -1 = 播放一次（不循环）
         cmd = [
             "ffmpeg",
             "-y",  # 覆盖已存在文件
             "-i", str(video_path),
             "-vf", f"fps={fps},scale={width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
-            "-loop", "1",
+            "-loop", "-1",
             str(gif_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
